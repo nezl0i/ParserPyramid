@@ -5,6 +5,8 @@ instance_url = '/rdinstance/getinstances/'
 count_url = '/rdinstance/getcount/'
 reports_url = '/reports/getreports/'
 create_report_url = '/reports/getreportparameters/?reportId='
+delete_url = '/rdinstance/deleteinstances/'
+access_level_url = '/rdinstance/getaccesslevel/'
 
 header = {
     "accept": "application/json, text/plain, */*",
@@ -26,6 +28,15 @@ instance_body = {
     "userCustomized": "false",
     "options": {}
 }
+
+delete_body = {
+    "deletingObject": [],
+    "deleteMeterPoints": False,
+    "deleteMeters": False,
+    "deleteAbonents": False,
+    "deleteAbonentAccounts": False
+}
+
 
 locate = {"Славянские ЭС": "Славянск",
           "Адыгейские ЭС": "Адыгей",

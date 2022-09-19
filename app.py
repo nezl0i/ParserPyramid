@@ -1,12 +1,15 @@
+import json
 import logging
 import os
 import sys
 import requests
+from requests.auth import AuthBase
+
 import common.logs
 from common.log_decorator import log
 from dotenv import load_dotenv
 from common.headers import header, login_url, base_url, count_url, login_body, locate, instance_body, \
-    instance_url, reports_url, create_report_url
+    instance_url, reports_url, create_report_url, delete_body, delete_url, access_level_url
 from requests.exceptions import ConnectionError
 
 load_dotenv()
@@ -22,6 +25,17 @@ class SessionUrlBase(requests.Session):
         modified_url = self.url_base + url
 
         return super(SessionUrlBase, self).request(method, modified_url, **kwargs)
+
+
+class APIAuth(AuthBase):
+    def __init__(self, token):
+        self.token = token
+
+    def __call__(self, r):
+        # header['authorization'] = f'Bearer {self.api_token}'
+        header['authorization'] = self.token
+        r.headers.update(header)
+        return r
 
 
 class PyramidParser:
@@ -48,12 +62,11 @@ class PyramidParser:
             LOGGER.critical(f'Соединение с сервером не установлено.')
             sys.exit(1)
         if out.status_code == 200:
-            token = out.json().get('tokens').get('accessToken')
-            header['authorization'] = f'Bearer {token}'
-
+            self.token = f"Bearer {out.json().get('tokens').get('accessToken')}"
+            header['authorization'] = self.token
             self.session.headers.update(header)
+            # self.session.auth = APIAuth(self.token)
             self.status = True
-            self.token = f'Bearer {token}'
 
             print(f'Авторизация прошла успешно. Ответ сервера - {out}')
             LOGGER.info(f'Пользователь {self.username} успешно авторизовался. Ответ сервера - {out}')
@@ -66,11 +79,10 @@ class PyramidParser:
     @log
     def count_instance(self):
         if self.status:
-            out = self.session.post(count_url, json=instance_body)
+            out = self.session.post(count_url, timeout=10, json=instance_body)
             self.meter_count = out.json()
             print(f'Всего ПУ в ИВК  - {self.meter_count}')
             return out
-        return
 
     @log
     def count_branch_instance(self):
@@ -82,6 +94,7 @@ class PyramidParser:
                 instance_body['options']['filter'] = f'["-13295", "contains", "{value}"]'
 
                 count = self.session.post(count_url, json=instance_body)
+
                 print(f'{key}: {count.text} ПУ')
 
                 total += int(count.text)
@@ -100,6 +113,7 @@ class PyramidParser:
                 out = self.session.post(instance_url, json=instance_body)
                 for item in out.json()['data']:
                     caption = item['caption']
+                    ids = item['id']
                     serial = item['-1494']
                     types = item['-56855']
                     inventory = item['-1496']
@@ -130,7 +144,7 @@ class PyramidParser:
                     info_exchange = item['28023301']
                     information = item['30396562']
 
-                    print(f'{types} - {serial} - {setup}')
+                    print(f'{ids} - {types} - {serial} - {setup}')
             skip += 1000
         return
 
@@ -162,6 +176,26 @@ class PyramidParser:
         instance_body['options']['filter'] = f'["-1494", "contains", "{serial}"]'
         response = self.session.post(instance_url, json=instance_body).json()
         print(response)
+        return response['data']
+
+    def delete_meter(self, serial: str):
+        if self.status:
+            try:
+                print(f'Ищем счетчик {serial}..')
+                ids = self.find_meter(serial)[0]['id']
+                print(f'Счетчик {serial} найден, идентификатор {ids}')
+                print(f'Удаляем счетчик с идентификатором {ids}...')
+                delete_body['deletingObject'].append(ids)
+                params = {"mode": "cors", "method": "DELETE"}
+                response = self.session.delete(delete_url, params=params, timeout=250.5, json=delete_body)
+                print(response)
+                print('Счетчик удален.')
+            except IndexError:
+                print('Счетчик не найден')
+
+    def access_level(self):
+        response = self.session.post(access_level_url, data='[-1596,-1594]').json()
+        print(response)
 
     def __str__(self):
         return f'Token - {self.token}\nStatus - {self.status}'
@@ -169,10 +203,13 @@ class PyramidParser:
 
 if __name__ == '__main__':
     parser = PyramidParser()
-    parser.count_instance().json()
+    parser.count_instance()
     # parser.count_branch_instance()
     # parser.instance_meter()
     # parser.get_reports()
-    # parser.create_report(1206351)
-    parser.find_meter('011293113203467')
-
+    # parser.create_report(25614553)
+    # parser.find_meter('53013169')
+    # parser.access_level()
+    parser.delete_meter('009217090304629')
+    # parser.find_meter('009217090304629')
+    parser.count_instance()
