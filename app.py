@@ -1,19 +1,43 @@
-import json
 import logging
-import os
 import sys
 import requests
 from requests.auth import AuthBase
-
+import conf
 import common.logs
 from common.log_decorator import log
-from dotenv import load_dotenv
 from common.headers import header, login_url, base_url, count_url, login_body, locate, instance_body, \
-    instance_url, reports_url, create_report_url, delete_body, delete_url, access_level_url
+    instance_url, reports_url, create_report_url, delete_body, delete_url, access_level_url, configurator_url
 from requests.exceptions import ConnectionError
 
-load_dotenv()
 LOGGER = logging.getLogger('parser')
+
+items = {
+    "Абоненты": -2147483648,
+    "Физические лица": -1594,
+    "Юридические лица": -1596,
+    "Организация": -2147483647,
+    "Подразделения": -29485,
+    "Контрагенты": -29475,
+    "Оборудование": -2147483646,
+    "Внешние дисплеи": -9952,
+    "Измерительные трансформаторы": -1576,
+    "Каналообразующее оборудование": -1568,
+    "Приборы учета электроэнергии": -1646,
+    "Ресурсы каналообразования": -2147483645,
+    "COM-порты": -1538,
+    "Модемы": -1524,
+    "Пулы модемов": -7847,
+    "Серверные сокеты": -29076,
+    "Сотовая связь": -2147483644,
+    "SIM-карты": -8053,
+    "Операторы сотовой связи": -8055,
+    "Профили": -2147483643,
+    "Профили источников данных": -3732,
+    "Профили получения": -3798,
+    "Профили отправки": -3796,
+    "Профили дисплеев": -9960,
+    "Технические учеты": 868770,
+    "Пользовательские справочники": -8083}
 
 
 class SessionUrlBase(requests.Session):
@@ -44,10 +68,11 @@ class PyramidParser:
         self.session = SessionUrlBase(url_base=base_url)
         self.session.headers.update(header)
         self.token = None
-        self.password = os.getenv('PASSWD')
-        self.username = os.getenv('LOGIN')
+        self.route_id = []
+        self.password = conf.PASSWD
+        self.username = conf.LOGIN
         self.status = False
-        self.meter_count = 0
+        self.item_count = 0
         self.login()
         LOGGER.info(f'Создан пользователь {self.username}')
 
@@ -77,16 +102,18 @@ class PyramidParser:
         return out
 
     @log
-    def count_instance(self):
+    def count_instance(self, class_id):
         if self.status:
+            instance_body['classId'] = class_id
             out = self.session.post(count_url, timeout=10, json=instance_body)
-            self.meter_count = out.json()
-            print(f'Всего ПУ в ИВК  - {self.meter_count}')
+            self.item_count = out.json()
+            print(f'Всего записей  - {self.item_count}')
             return out
 
     @log
-    def count_branch_instance(self):
+    def count_branch_instance(self, class_id):
         total = 0
+        instance_body['classId'] = class_id
         if self.status:
             for key, value in locate.items():
                 instance_body['options']['take'] = '50'
@@ -102,10 +129,60 @@ class PyramidParser:
         return
 
     @log
-    def instance_meter(self):
+    def instance_route(self, class_id):
         take = 1000  # Количество записей на странице
-        skip = 0     # От какой записи
-        while skip < self.meter_count - (self.meter_count % 1000):
+        skip = 0  # От какой записи
+        instance_body['classId'] = class_id
+        while skip < self.item_count - (self.item_count % 1000):
+            instance_body['options']['sort'] = '[{"selector":"id","desc":false}]'
+            instance_body['options']['skip'] = str(skip)
+            instance_body['options']['take'] = str(take)
+            if self.status:
+                out = self.session.post(instance_url, json=instance_body)
+                for item in out.json()['data']:
+                    caption = item['caption']
+                    ids = item['id']
+                    serial = item['-1494']
+                    types = item['-56855']
+                    inventory = item['-1496']
+                    try:
+                        setup = item['-14263']['caption']
+                    except TypeError:
+                        setup = 'None'
+                    soft_version = item['-3508']
+                    comment = item['-6153']
+                    try:
+                        visibility = item['-13295'][0]['caption']
+                    except IndexError:
+                        visibility = 'None'
+                    try:
+                        route = item['-3134'][0]['caption']
+                    except IndexError:
+                        route = 'None'
+                    with open('route.txt', 'a', encoding='utf8') as f:
+                        f.write(
+                            f'ID - {ids}\nНаименование - {caption}\n'
+                            f'Серийный номер - {serial}\n'
+                            f'Тип - {types}\n'
+                            f'Инвентарный номер - {inventory}\n'
+                            f'Место установки - {setup}\n'
+                            f'Версия ПО - {soft_version}\n'
+                            f'Область видимости - {visibility}\n'
+                            f'Комментарий - {comment}\n'
+                            f'Маршрут - {route}\n=========================\n')
+                    self.route_id.append(ids)
+            skip += 1000
+            with open('ids.txt', 'w') as f:
+                f.write(str(self.route_id))
+        print(self.route_id)
+        return
+
+    @log
+    def instance_meter(self, class_id):
+        take = 1000  # Количество записей на странице
+        skip = 0  # От какой записи
+        instance_body['classId'] = class_id
+        while skip < self.item_count - (self.item_count % 1000):
             instance_body['options']['sort'] = '[{"selector":"id","desc":false}]'
             instance_body['options']['skip'] = str(skip)
             instance_body['options']['take'] = str(take)
@@ -149,6 +226,13 @@ class PyramidParser:
         return
 
     @log
+    def configurator(self, ids: list):
+        for _id in ids:
+            conf_url = f'{configurator_url}{_id}'
+            response = self.session.get(conf_url)
+            print(response.json())
+
+    @log
     def get_reports(self):
         response = self.session.get(reports_url)
         for report in response.json():
@@ -170,7 +254,8 @@ class PyramidParser:
             print(param.get('parameterName'))
 
     @log
-    def find_meter(self, serial: str):
+    def find_meter(self, serial: str, class_id):
+        instance_body['classId'] = class_id
         instance_body['options']['take'] = '50'
         instance_body['options']['sort'] = '[{"selector":"id","desc":false}]'
         instance_body['options']['filter'] = f'["-1494", "contains", "{serial}"]'
@@ -203,13 +288,15 @@ class PyramidParser:
 
 if __name__ == '__main__':
     parser = PyramidParser()
-    parser.count_instance()
+    parser.count_instance(items["Каналообразующее оборудование"])
+    # parser.instance_route(items["Каналообразующее оборудование"])
+    parser.configurator([21521238, 21521273])
     # parser.count_branch_instance()
     # parser.instance_meter()
     # parser.get_reports()
     # parser.create_report(25614553)
     # parser.find_meter('53013169')
     # parser.access_level()
-    parser.delete_meter('009217090304629')
-    # parser.find_meter('009217090304629')
-    parser.count_instance()
+    # parser.delete_meter('009217090304629')
+    # parser.find_meter('26899455')
+    # parser.count_instance()

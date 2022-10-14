@@ -7,6 +7,7 @@ reports_url = '/reports/getreports/'
 create_report_url = '/reports/getreportparameters/?reportId='
 delete_url = '/rdinstance/deleteinstances/'
 access_level_url = '/rdinstance/getaccesslevel/'
+configurator_url = '/xmlcfg/readxmlconfiguration/?equipmentId='
 
 header = {
     "accept": "application/json, text/plain, */*",
@@ -24,7 +25,7 @@ login_body = {
 }
 
 instance_body = {
-    "classId": -1646,
+    # "classId": -1646,
     "userCustomized": "false",
     "options": {}
 }
